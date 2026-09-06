@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: wallet-analysis-pipeline
+  cancel-in-progress: false
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
@@ -36,4 +40,5 @@ jobs:
           git config user.email "actions@github.com"
           git add wallet_analysis/
           git diff --quiet --cached || git commit -m "Update wallet analysis progress [skip ci]"
+          git pull --rebase origin main
           git push
