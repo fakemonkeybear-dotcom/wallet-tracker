@@ -12,6 +12,7 @@ DATA_DIR = "wallet_analysis"
 SHARDS_DIR = f"{DATA_DIR}/shards"
 COMBINED_FILE = f"{DATA_DIR}/hyperliquid_wallet_analysis.csv"
 FINAL_FILE = f"{DATA_DIR}/FINAL_ranked_wallets.csv"
+WATCHLIST_FILE = f"{DATA_DIR}/WATCHLIST_short_history_wallets.csv"
 
 
 def main():
@@ -26,8 +27,9 @@ def main():
     combined.to_csv(COMBINED_FILE, index=False)
     print(f"Combined {len(shard_files)} shards into {len(combined)} total wallets.")
 
-    run_ranking(COMBINED_FILE, FINAL_FILE, top_n=None)
+    run_ranking(COMBINED_FILE, FINAL_FILE, watchlist_file=WATCHLIST_FILE, top_n=None)
 
 
 if __name__ == "__main__":
     main()
+    
