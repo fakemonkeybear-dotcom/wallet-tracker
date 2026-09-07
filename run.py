@@ -18,7 +18,7 @@ SHARD_INDEX = int(os.environ.get("SHARD_INDEX", 0))
 SHARD_COUNT = int(os.environ.get("SHARD_COUNT", 1))
 
 ANALYSIS_FILE = f"{SHARDS_DIR}/shard_{SHARD_INDEX}.csv"
-STATUS_FILE = f"{DATA_DIR}/STATUS.txt"
+STATUS_FILE = f"{DATA_DIR}/status_shard_{SHARD_INDEX}.txt"
 
 TOTAL_BUDGET = int(os.environ.get("TIME_BUDGET_SECONDS", 5.5 * 3600))
 
@@ -39,3 +39,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
