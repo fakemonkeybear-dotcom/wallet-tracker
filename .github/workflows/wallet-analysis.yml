@@ -19,7 +19,7 @@ jobs:
     strategy:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
-      fail-fast: false
+      fail-fast: false   # one shard failing shouldn't cancel the others
 
     steps:
       - name: Checkout repo
@@ -44,14 +44,14 @@ jobs:
         run: |
           git config user.name "wallet-analysis-bot"
           git config user.email "actions@github.com"
-          git add wallet_analysis/shards/shard_${{ matrix.shard }}.csv wallet_analysis/STATUS.txt
+          git add wallet_analysis/shards/shard_${{ matrix.shard }}.csv wallet_analysis/status_shard_${{ matrix.shard }}.txt
           git diff --quiet --cached || git commit -m "Update shard ${{ matrix.shard }} progress [skip ci]"
           git pull --rebase origin main
           git push
 
   merge-and-rank:
     needs: run-shards
-    if: always()
+    if: always()   # merge whatever shards succeeded, even if one failed
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -78,3 +78,4 @@ jobs:
           git diff --quiet --cached || git commit -m "Merge shards + update final ranking [skip ci]"
           git pull --rebase origin main
           git push
+
