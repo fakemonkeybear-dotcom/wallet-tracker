@@ -1,0 +1,80 @@
+name: Wallet Analysis Pipeline
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wallet-analysis-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-shards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+      fail-fast: false
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run shard
+        env:
+          TIME_BUDGET_SECONDS: "19800"
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: "8"
+        run: python run.py
+
+      - name: Commit and push this shard's results
+        run: |
+          git config user.name "wallet-analysis-bot"
+          git config user.email "actions@github.com"
+          git add wallet_analysis/shards/shard_${{ matrix.shard }}.csv wallet_analysis/STATUS.txt
+          git diff --quiet --cached || git commit -m "Update shard ${{ matrix.shard }} progress [skip ci]"
+          git pull --rebase origin main
+          git push
+
+  merge-and-rank:
+    needs: run-shards
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Merge shards and rank
+        run: python merge_results.py
+
+      - name: Commit and push final results
+        run: |
+          git config user.name "wallet-analysis-bot"
+          git config user.email "actions@github.com"
+          git add wallet_analysis/
+          git diff --quiet --cached || git commit -m "Merge shards + update final ranking [skip ci]"
+          git pull --rebase origin main
+          git push
