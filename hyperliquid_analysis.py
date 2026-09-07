@@ -237,37 +237,67 @@ def run_analysis(wallet_file, output_file, time_budget_seconds,
     return (len(done) + checked) >= len(wallets)
 
 
-def run_ranking(analysis_file, final_file, top_n=None,
-                min_closing_trades=50, min_profit_factor=1.5):
-    if not os.path.exists(analysis_file):
-        print("Analysis file missing — nothing to rank yet.")
-        return
-
-    df = pd.read_csv(analysis_file)
+def _base_clean(df):
+    """Shared safety filters applied to both tiers, no exceptions."""
     df = df[df["has_activity"] == True]
-    df = df[df["num_closing_trades"] >= min_closing_trades]
-    df = df[df["ever_liquidated"] != True]           # hard exclude, no exceptions
-    df = df[df["is_bag_holding"] != True]             # not currently underwater and holding
-
-    # profit_factor: treat "inf" (no losses at all) as a very high but
-    # finite number so ranking math doesn't break, while still ranking
-    # them at the top where they belong
+    df = df[df["ever_liquidated"] != True]     # hard exclude, no exceptions
+    df = df[df["is_bag_holding"] != True]      # not currently underwater and holding
     df["profit_factor_numeric"] = df["profit_factor"].replace("inf", 999).astype(float)
-    df = df[df["profit_factor_numeric"] >= min_profit_factor]
+    return df
 
-    # concentration_ratio and win_rate are kept as visible columns for your
-    # own review — NOT used in scoring. A high concentration ratio is the
-    # expected signature of a genuine rare-big-win strategy, not a flaw.
 
-    df["score"] = (
+def _score(df):
+    return (
         df["profit_factor_numeric"].rank(pct=True) * 0.50
         + df["total_closed_pnl"].rank(pct=True) * 0.30
         + df["num_closing_trades"].rank(pct=True) * 0.20
     )
 
-    ranked = df.sort_values("score", ascending=False)
-    if top_n:
-        ranked = ranked.head(top_n)
 
-    ranked.to_csv(final_file, index=False)
-    print(f"Ranking written: {final_file} ({len(ranked)} wallets)")
+def run_ranking(analysis_file, final_file, watchlist_file=None, top_n=None,
+                min_closing_trades=50, min_profit_factor=1.5,
+                watchlist_min_trades=10, watchlist_min_profit_factor=3.0):
+    """
+    Produces two tiers:
+      MAIN (final_file): 50+ closed trades — statistically solid, the
+        profit-factor number can be trusted at face value.
+      WATCHLIST (watchlist_file): 10-49 closed trades but an exceptionally
+        high profit factor. Could be a real insider who trades briefly and
+        moves on — could also just be a small sample getting lucky. Shown
+        separately and clearly labeled as such; needs a manual look at the
+        actual trades, not treated as equal to the main list.
+    Both tiers share the same liquidation exclusion and bag-holding check —
+    those are never relaxed regardless of sample size.
+    """
+    if not os.path.exists(analysis_file):
+        print("Analysis file missing — nothing to rank yet.")
+        return
+
+    raw = pd.read_csv(analysis_file)
+    clean = _base_clean(raw)
+
+    # --- MAIN LIST ---
+    main_df = clean[clean["num_closing_trades"] >= min_closing_trades]
+    main_df = main_df[main_df["profit_factor_numeric"] >= min_profit_factor]
+    main_df = main_df.copy()
+    main_df["score"] = _score(main_df)
+    main_ranked = main_df.sort_values("score", ascending=False)
+    if top_n:
+        main_ranked = main_ranked.head(top_n)
+    main_ranked.to_csv(final_file, index=False)
+    print(f"Main ranking written: {final_file} ({len(main_ranked)} wallets, 50+ trades)")
+
+    # --- WATCHLIST: short history, but exceptional profit factor ---
+    if watchlist_file:
+        watch_df = clean[
+            (clean["num_closing_trades"] >= watchlist_min_trades)
+            & (clean["num_closing_trades"] < min_closing_trades)
+        ]
+        watch_df = watch_df[watch_df["profit_factor_numeric"] >= watchlist_min_profit_factor]
+        watch_df = watch_df.copy()
+        watch_df["score"] = _score(watch_df)
+        watch_ranked = watch_df.sort_values("score", ascending=False)
+        watch_ranked.to_csv(watchlist_file, index=False)
+        print(f"Watchlist written: {watchlist_file} ({len(watch_ranked)} wallets, "
+              f"{watchlist_min_trades}-{min_closing_trades-1} trades, needs manual review)")
+  
