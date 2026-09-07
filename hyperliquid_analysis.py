@@ -109,6 +109,8 @@ def analyze_wallet(address):
             "first_fill_time": None, "last_fill_time": None,
             "active_days": 0, "largest_single_trade_pnl": 0.0,
             "concentration_ratio": None, "account_equity": None,
+            "num_open_positions": 0, "total_unrealized_pnl": 0.0,
+            "unrealized_pct_of_equity": None, "is_bag_holding": False,
         }
 
     closing_trades = [f for f in fills if float(f.get("closedPnl", 0) or 0) != 0]
@@ -125,11 +127,34 @@ def analyze_wallet(address):
 
     chs = get_clearinghouse_state(address)
     account_equity = None
+    total_unrealized_pnl = 0.0
+    num_open_positions = 0
     if chs and "marginSummary" in chs:
         try:
             account_equity = float(chs["marginSummary"].get("accountValue", 0))
         except (TypeError, ValueError):
             account_equity = None
+        for p in chs.get("assetPositions", []):
+            pos = p.get("position", {})
+            if float(pos.get("szi", 0) or 0) != 0:
+                num_open_positions += 1
+                total_unrealized_pnl += float(pos.get("unrealizedPnl", 0) or 0)
+
+    unrealized_pct_of_equity = (
+        (total_unrealized_pnl / account_equity * 100)
+        if account_equity and account_equity > 0 else None
+    )
+    # BAG-HOLDING FLAG: currently sitting on an open position that's losing
+    # more than 5% of their account value right now. This is a live-risk
+    # check, separate from historical win rate — a wallet can have a
+    # flawless closed-trade record while quietly holding an underwater bag
+    # it just hasn't closed yet. Copy-trading a wallet mid-bag means
+    # inheriting that exact loss the moment it finally closes.
+    is_bag_holding = bool(
+        total_unrealized_pnl < 0
+        and unrealized_pct_of_equity is not None
+        and unrealized_pct_of_equity < -5
+    )
 
     return {
         "address": address,
@@ -147,6 +172,10 @@ def analyze_wallet(address):
         "largest_single_trade_pnl": round(largest, 2),
         "concentration_ratio": round(concentration, 3) if concentration is not None else None,
         "account_equity": account_equity,
+        "num_open_positions": num_open_positions,
+        "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+        "unrealized_pct_of_equity": round(unrealized_pct_of_equity, 1) if unrealized_pct_of_equity is not None else None,
+        "is_bag_holding": is_bag_holding,
     }
 
 
@@ -194,6 +223,7 @@ def run_ranking(analysis_file, final_file, top_n=None,
     df = df[df["num_closing_trades"] >= min_closing_trades]
     df = df[df["active_days"] >= min_active_days]
     df = df[df["total_closed_pnl"] > 0]  # only rank actually-profitable wallets
+    df = df[df["is_bag_holding"] != True]  # exclude wallets currently sitting on an underwater open position
 
     # concentration_ratio close to 1 means "one trade explains almost all the
     # profit" — that's the "just lucky" pattern being flagged, not excluded
@@ -213,3 +243,4 @@ def run_ranking(analysis_file, final_file, top_n=None,
 
     ranked.to_csv(final_file, index=False)
     print(f"Ranking written: {final_file} ({len(ranked)} wallets)")
+  
